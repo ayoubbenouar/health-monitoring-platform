@@ -1,0 +1,98 @@
+# Health Monitoring Platform - Local development
+# Run from project root: docker-compose -f infrastructure/docker-compose.yml up -d
+# Or: cd infrastructure && docker-compose up -d
+# API Gateway: http://localhost:8080
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: health_users
+    ports:
+      - "5433:5432"   # 5433 sur l'hôte pour éviter conflit avec PostgreSQL local
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  mongodb:
+    image: mongo:6
+    ports:
+      - "27018:27017"   # 27018 sur l'hôte pour éviter conflit avec MongoDB local
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  user-service:
+    build: ../services/user-service
+    ports:
+      - "8011:8001"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/health_users
+      JWT_SECRET: dev-secret-change-in-prod
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  health-data-service:
+    build: ../services/health-data-service
+    ports:
+      - "8012:8002"
+    environment:
+      MONGO_URI: mongodb://mongodb:27017
+      MONGO_DB: health_data
+      AI_INFERENCE_SERVICE_URL: http://ai-inference-service:8003
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      ai-inference-service:
+        condition: service_started
+
+  ai-inference-service:
+    build: ../services/ai-inference-service
+    ports:
+      - "8013:8003"
+
+  notification-service:
+    build: ../services/notification-service
+    ports:
+      - "8014:8004"
+
+  api-gateway:
+    build: ../services/api-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      USER_SERVICE_URL: http://user-service:8001
+      HEALTH_DATA_SERVICE_URL: http://health-data-service:8002
+      AI_INFERENCE_SERVICE_URL: http://ai-inference-service:8003
+      NOTIFICATION_SERVICE_URL: http://notification-service:8004
+      JWT_SECRET: dev-secret-change-in-prod
+    depends_on:
+      user-service:
+        condition: service_healthy
+      health-data-service:
+        condition: service_started
+      ai-inference-service:
+        condition: service_started
+      notification-service:
+        condition: service_started
+
+volumes:
+  postgres_data:
+  mongo_data:

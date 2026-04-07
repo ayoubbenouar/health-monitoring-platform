@@ -1,0 +1,200 @@
+# Kubernetes base manifests - Health Monitoring Platform
+# Apply with: kubectl apply -f infrastructure/kubernetes/
+# Requires: PostgreSQL and MongoDB (or use cloud-managed services)
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-gateway-config
+data:
+  USER_SERVICE_URL: "http://user-service:8001"
+  HEALTH_DATA_SERVICE_URL: "http://health-data-service:8002"
+  AI_INFERENCE_SERVICE_URL: "http://ai-inference-service:8003"
+  NOTIFICATION_SERVICE_URL: "http://notification-service:8004"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: user-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: user-service
+  template:
+    metadata:
+      labels:
+        app: user-service
+    spec:
+      containers:
+        - name: user-service
+          image: health-platform/user-service:latest
+          ports:
+            - containerPort: 8001
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: db-secrets
+                  key: postgres-url
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: jwt-secret
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: user-service
+spec:
+  selector:
+    app: user-service
+  ports:
+    - port: 8001
+      targetPort: 8001
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: health-data-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: health-data-service
+  template:
+    metadata:
+      labels:
+        app: health-data-service
+    spec:
+      containers:
+        - name: health-data-service
+          image: health-platform/health-data-service:latest
+          ports:
+            - containerPort: 8002
+          env:
+            - name: MONGO_URI
+              valueFrom:
+                secretKeyRef:
+                  name: db-secrets
+                  key: mongo-uri
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: health-data-service
+spec:
+  selector:
+    app: health-data-service
+  ports:
+    - port: 8002
+      targetPort: 8002
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-inference-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ai-inference-service
+  template:
+    metadata:
+      labels:
+        app: ai-inference-service
+    spec:
+      containers:
+        - name: ai-inference-service
+          image: health-platform/ai-inference-service:latest
+          ports:
+            - containerPort: 8003
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-inference-service
+spec:
+  selector:
+    app: ai-inference-service
+  ports:
+    - port: 8003
+      targetPort: 8003
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notification-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: notification-service
+  template:
+    metadata:
+      labels:
+        app: notification-service
+    spec:
+      containers:
+        - name: notification-service
+          image: health-platform/notification-service:latest
+          ports:
+            - containerPort: 8004
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: notification-service
+spec:
+  selector:
+    app: notification-service
+  ports:
+    - port: 8004
+      targetPort: 8004
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api-gateway
+  template:
+    metadata:
+      labels:
+        app: api-gateway
+    spec:
+      containers:
+        - name: api-gateway
+          image: health-platform/api-gateway:latest
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: api-gateway-config
+          env:
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: jwt-secret
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-gateway
+spec:
+  type: LoadBalancer
+  selector:
+    app: api-gateway
+  ports:
+    - port: 80
+      targetPort: 8080
+---
+# Placeholder secrets - replace with real secrets (e.g. sealed-secrets, external secrets)
+# kubectl create secret generic db-secrets --from-literal=postgres-url=... --from-literal=mongo-uri=...
+# kubectl create secret generic app-secrets --from-literal=jwt-secret=...
